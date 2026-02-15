@@ -1,98 +1,233 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { Banknote, Package, TrendingUp, Users } from 'lucide-react-native';
+import React, { useCallback, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Card, Text, useTheme } from 'react-native-paper';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { supabase } from '@/lib/supabase';
+
+interface DashboardStats {
+    todayQuantity: number;
+    todayRevenue: number;
+    todayCustomerCount: number;
+    totalDebt: number;
+}
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    const theme = useTheme();
+    const [stats, setStats] = useState<DashboardStats>({
+        todayQuantity: 0,
+        todayRevenue: 0,
+        todayCustomerCount: 0,
+        totalDebt: 0,
+    });
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
-  );
+    const fetchStats = useCallback(async () => {
+        // Today's start in ISO
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const todayISO = todayStart.toISOString();
+
+        // Fetch today's orders
+        const { data: todayOrders } = await supabase
+            .from('orders')
+            .select('quantity, total_price, customer_id')
+            .gte('order_date', todayISO);
+
+        let todayQuantity = 0;
+        let todayRevenue = 0;
+        const uniqueCustomers = new Set<string>();
+
+        if (todayOrders) {
+            for (const order of todayOrders) {
+                todayQuantity += order.quantity ?? 0;
+                todayRevenue += Number(order.total_price ?? 0);
+                uniqueCustomers.add(order.customer_id);
+            }
+        }
+
+        // Fetch total outstanding debt
+        const { data: customers } = await supabase
+            .from('customers')
+            .select('current_balance');
+
+        let totalDebt = 0;
+        if (customers) {
+            for (const c of customers) {
+                if (c.current_balance > 0) {
+                    totalDebt += Number(c.current_balance);
+                }
+            }
+        }
+
+        setStats({
+            todayQuantity,
+            todayRevenue,
+            todayCustomerCount: uniqueCustomers.size,
+            totalDebt,
+        });
+        setLoading(false);
+        setRefreshing(false);
+    }, []);
+
+    useFocusEffect(
+        useCallback(() => {
+            setLoading(true);
+            fetchStats();
+        }, [fetchStats])
+    );
+
+    const onRefresh = useCallback(() => {
+        setRefreshing(true);
+        fetchStats();
+    }, [fetchStats]);
+
+    const formatCurrency = (amount: number) =>
+        new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(amount);
+
+    if (loading) {
+        return (
+            <View style={[styles.container, styles.centered, { backgroundColor: theme.colors.background }]}>
+                <ActivityIndicator size="large" color={theme.colors.primary} />
+            </View>
+        );
+    }
+
+    return (
+        <ScrollView
+            style={[styles.container, { backgroundColor: theme.colors.background }]}
+            contentContainerStyle={styles.scrollContent}
+            refreshControl={
+                <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                    colors={[theme.colors.primary]}
+                    tintColor={theme.colors.primary}
+                />
+            }
+        >
+            {/* Brand Header */}
+            <View style={styles.header}>
+                <Text variant="headlineLarge" style={[styles.title, { color: theme.colors.primary }]}>
+                    🫓 Lavaş Fırını
+                </Text>
+                <Text variant="bodyLarge" style={{ color: theme.colors.onSurfaceVariant }}>
+                    Günlük Özet
+                </Text>
+            </View>
+
+            {/* Stats Grid */}
+            <View style={styles.grid}>
+                {/* Today's Production */}
+                <Card style={[styles.statCard, { backgroundColor: theme.colors.surface }]} mode="elevated">
+                    <Card.Content style={styles.statContent}>
+                        <View style={[styles.iconCircle, { backgroundColor: theme.colors.primaryContainer }]}>
+                            <Package size={24} color={theme.colors.primary} />
+                        </View>
+                        <Text variant="headlineMedium" style={{ color: theme.colors.onSurface, fontWeight: '800' }}>
+                            {stats.todayQuantity}
+                        </Text>
+                        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }}>
+                            Bugünün Üretimi
+                        </Text>
+                    </Card.Content>
+                </Card>
+
+                {/* Daily Revenue */}
+                <Card style={[styles.statCard, { backgroundColor: theme.colors.surface }]} mode="elevated">
+                    <Card.Content style={styles.statContent}>
+                        <View style={[styles.iconCircle, { backgroundColor: '#E8F5E9' }]}>
+                            <TrendingUp size={24} color="#2E7D32" />
+                        </View>
+                        <Text variant="headlineMedium" style={{ color: '#2E7D32', fontWeight: '800' }}>
+                            {formatCurrency(stats.todayRevenue)}
+                        </Text>
+                        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }}>
+                            Günlük Ciro
+                        </Text>
+                    </Card.Content>
+                </Card>
+            </View>
+
+            <View style={styles.grid}>
+                {/* Active Customers */}
+                <Card style={[styles.statCard, { backgroundColor: theme.colors.surface }]} mode="elevated">
+                    <Card.Content style={styles.statContent}>
+                        <View style={[styles.iconCircle, { backgroundColor: '#E3F2FD' }]}>
+                            <Users size={24} color="#1565C0" />
+                        </View>
+                        <Text variant="headlineMedium" style={{ color: '#1565C0', fontWeight: '800' }}>
+                            {stats.todayCustomerCount}
+                        </Text>
+                        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }}>
+                            Bugünkü Müşteri
+                        </Text>
+                    </Card.Content>
+                </Card>
+
+                {/* Total Debt */}
+                <Card style={[styles.statCard, { backgroundColor: theme.colors.surface }]} mode="elevated">
+                    <Card.Content style={styles.statContent}>
+                        <View style={[styles.iconCircle, { backgroundColor: '#FFEBEE' }]}>
+                            <Banknote size={24} color="#D32F2F" />
+                        </View>
+                        <Text variant="headlineMedium" style={{ color: '#D32F2F', fontWeight: '800' }}>
+                            {formatCurrency(stats.totalDebt)}
+                        </Text>
+                        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }}>
+                            Toplam Borç
+                        </Text>
+                    </Card.Content>
+                </Card>
+            </View>
+        </ScrollView>
+    );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
+    container: {
+        flex: 1,
+    },
+    centered: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    scrollContent: {
+        padding: 20,
+        paddingBottom: 40,
+    },
+    header: {
+        marginTop: 8,
+        marginBottom: 24,
+        alignItems: 'center',
+    },
+    title: {
+        fontWeight: '700',
+        marginBottom: 4,
+    },
+    grid: {
+        flexDirection: 'row',
+        gap: 12,
+        marginBottom: 12,
+    },
+    statCard: {
+        flex: 1,
+        borderRadius: 16,
+        elevation: 2,
+    },
+    statContent: {
+        alignItems: 'center',
+        paddingVertical: 20,
+        gap: 6,
+    },
+    iconCircle: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 4,
+    },
 });

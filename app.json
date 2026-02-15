@@ -38,6 +38,12 @@
             "backgroundColor": "#000000"
           }
         }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Rehberden müşteri bilgilerini otomatik doldurmak için erişim izni gereklidir."
+        }
       ]
     ],
     "experiments": {
