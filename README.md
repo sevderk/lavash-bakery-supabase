@@ -65,7 +65,14 @@ Traditional methods (paper, notebooks, or scattered Excel files) often lead to d
 
 ## Screenshots
 
-![WhatsApp Image 2026-02-15 at 18 20 37](https://github.com/user-attachments/assets/f1bfc439-bc30-44d3-9bba-c2f79725c1b4)
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/53dff526-471c-4e79-9fcc-eec8c0f41aae" width="165" />
+  <img src="https://github.com/user-attachments/assets/f8dfadfa-693e-41f8-b5b5-233bd37c5dda" width="165" />
+  <img src="https://github.com/user-attachments/assets/69fb6ba3-18d1-4fa7-b315-d46db336fccd" width="165" />
+  <img src="https://github.com/user-attachments/assets/8c1f5790-5862-4677-b929-f1b6991108db" width="165" />
+  <img src="https://github.com/user-attachments/assets/97390dbb-7cec-4e16-9d0d-8f43e71f220e" width="165" />
+  <img src="https://github.com/user-attachments/assets/fd25be30-bbd1-41d8-9f82-7005c3bd9585" width="165" />
+</p>
 
 ---
 
