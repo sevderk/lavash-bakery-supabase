@@ -47,4 +47,78 @@ Traditional methods (paper, notebooks, or scattered Excel files) often lead to d
 ### 4. Reporting & Exporting
 * **Excel Export:** Generate and share daily distribution lists in `.xlsx` format.
 * **WhatsApp Summary:** Copy a text-based summary of the distribution list to share with drivers.
-* **Dashboard:** View
+* **Dashboard:** View daily revenue, production targets, and active customer counts.
+
+---
+
+## 🛠️ Tech Stack
+
+* **Frontend:** React Native (Expo Router)
+* **Language:** TypeScript
+* **Backend & Database:** Supabase (PostgreSQL)
+* **State Management:** Zustand (with Persist Middleware)
+* **UI Library:** React Native Paper
+* **Key Libraries:**
+    * `expo-contacts`: For contact list integration.
+    * `xlsx`: For Excel reporting.
+    * `expo-sharing`: For file sharing.
+
+---
+
+## Screenshots
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/53dff526-471c-4e79-9fcc-eec8c0f41aae" width="165" />
+  <img src="https://github.com/user-attachments/assets/f8dfadfa-693e-41f8-b5b5-233bd37c5dda" width="165" />
+  <img src="https://github.com/user-attachments/assets/69fb6ba3-18d1-4fa7-b315-d46db336fccd" width="165" />
+  <img src="https://github.com/user-attachments/assets/8c1f5790-5862-4677-b929-f1b6991108db" width="165" />
+  <img src="https://github.com/user-attachments/assets/97390dbb-7cec-4e16-9d0d-8f43e71f220e" width="165" />
+  <img src="https://github.com/user-attachments/assets/fd25be30-bbd1-41d8-9f82-7005c3bd9585" width="165" />
+</p>
+
+---
+
+## ⚙️ Installation & Setup
+
+To run this project locally:
+
+1.  **Clone the Repository:**
+    ```bash
+    git clone https://github.com/sevderk/lavash-bakery-supabase.git
+    cd lavash-bakery-supabase
+    ```
+
+2.  **Install Dependencies:**
+    ```bash
+    npm install
+    ```
+
+3.  **Environment Variables (.env):**
+    Create a `.env` file in the root directory and add your Supabase credentials:
+    ```env
+    EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
+    EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+    ```
+
+4.  **Run the App:**
+    ```bash
+    npx expo start
+    ```
+
+---
+
+## 🗄️ Database Structure (Supabase)
+
+The project runs on PostgreSQL with the following core tables:
+
+* **customers:** `id`, `name`, `phone`, `current_balance`
+* **orders:** `id`, `customer_id`, `quantity`, `total_price`, `status`, `date`
+* **payments:** `id`, `customer_id`, `amount`, `date`
+
+*Note: The `current_balance` field is managed automatically via SQL Trigger functions.*
+
+---
+
+## 📄 License
+
+This project is licensed under the [MIT](LICENSE) License.
