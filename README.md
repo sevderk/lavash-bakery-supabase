@@ -1,4 +1,4 @@
-# 🍞 Lavash Bakery Management System
+# 🫓 Lavash Bakery Management System
 
 > **A mobile-first solution for production planning and debt tracking, replacing complex Excel sheets.**
 
@@ -7,6 +7,8 @@ This project is designed for a flatbread (lavash) bakery to streamline daily ord
 ![Project Status](https://img.shields.io/badge/Status-Completed-success)
 ![Tech Stack](https://img.shields.io/badge/React_Native-Expo-blue)
 ![Backend](https://img.shields.io/badge/Backend-Supabase-green)
+
+> [📱 Download APK (v1.0)](https://github.com/sevderk/lavash-bakery-supabase/releases/download/v1.0.0/application-1920b48b-2c35-497b-a3ca-544d9a988707.apk)
 
 ---
 
@@ -82,7 +84,7 @@ To run this project locally:
 
 1.  **Clone the Repository:**
     ```bash
-    git clone [https://github.com/YOUR_USERNAME/lavash-bakery-supabase.git](https://github.com/YOUR_USERNAME/lavash-bakery-supabase.git)
+    git clone https://github.com/sevderk/lavash-bakery-supabase.git
     cd lavash-bakery-supabase
     ```
 
