@@ -1,5 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import { cacheDirectory, EncodingType, writeAsStringAsync } from 'expo-file-system/src/legacy';
+import * as Print from 'expo-print';
 import { useFocusEffect } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import {
@@ -7,6 +8,7 @@ import {
     ChevronLeft,
     ChevronRight,
     FileSpreadsheet,
+    FileText,
     MessageCircle
 } from 'lucide-react-native';
 import React, { useCallback, useMemo, useState } from 'react';
@@ -39,6 +41,7 @@ interface ReportRow {
     unitPrice: number;
     totalPrice: number;
     status: string;
+    productSummary: string;
 }
 
 export default function ReportsScreen() {
@@ -80,7 +83,7 @@ export default function ReportsScreen() {
 
         const { data, error } = await supabase
             .from('orders')
-            .select('id, quantity, unit_price, total_price, status, customer_id, customers(name)')
+            .select('id, quantity, unit_price, total_price, status, customer_id, customers(name), order_items(quantity, products(name))')
             .gte('order_date', dayStart.toISOString())
             .lte('order_date', dayEnd.toISOString())
             .order('customers(name)', { ascending: true });
@@ -89,14 +92,26 @@ export default function ReportsScreen() {
             console.error('Rapor yükleme hatası:', error.message);
             setRows([]);
         } else {
-            const mapped: ReportRow[] = (data ?? []).map((o: any) => ({
-                id: o.id,
-                customerName: o.customers?.name ?? 'Bilinmeyen',
-                quantity: o.quantity,
-                unitPrice: Number(o.unit_price),
-                totalPrice: Number(o.total_price),
-                status: o.status,
-            }));
+            const mapped: ReportRow[] = (data ?? []).map((o: any) => {
+                // Build product summary from order_items
+                const items: { name: string; qty: number }[] = (o.order_items ?? []).map((oi: any) => ({
+                    name: oi.products?.name ?? '?',
+                    qty: oi.quantity ?? 0,
+                }));
+                const productSummary = items.length > 0
+                    ? items.map((i) => `${i.qty}x ${i.name}`).join(', ')
+                    : `${o.quantity} Adet`;
+
+                return {
+                    id: o.id,
+                    customerName: o.customers?.name ?? 'Bilinmeyen',
+                    quantity: o.quantity,
+                    unitPrice: Number(o.unit_price),
+                    totalPrice: Number(o.total_price),
+                    status: o.status,
+                    productSummary,
+                };
+            });
             setRows(mapped);
         }
 
@@ -141,16 +156,15 @@ export default function ReportsScreen() {
 
         try {
             const wsData = [
-                ['Müşteri', 'Miktar', 'Birim Fiyat', 'Toplam', 'Durum'],
+                ['Müşteri', 'Ürünler', 'Toplam', 'Durum'],
                 ...rows.map((r) => [
                     r.customerName,
-                    r.quantity,
-                    r.unitPrice,
+                    r.productSummary,
                     r.totalPrice,
                     statusLabel(r.status),
                 ]),
                 [],
-                ['TOPLAM', summary.totalQty, '', summary.totalAmount, ''],
+                ['TOPLAM', `${summary.totalQty} Adet`, summary.totalAmount, ''],
             ];
 
             const ws = XLSX.utils.aoa_to_sheet(wsData);
@@ -158,8 +172,7 @@ export default function ReportsScreen() {
             // Column widths
             ws['!cols'] = [
                 { wch: 25 }, // Müşteri
-                { wch: 10 }, // Miktar
-                { wch: 12 }, // Birim Fiyat
+                { wch: 30 }, // Ürünler
                 { wch: 12 }, // Toplam
                 { wch: 15 }, // Durum
             ];
@@ -200,7 +213,7 @@ export default function ReportsScreen() {
         let text = `📅 ${dateStr} Dağıtım Listesi\n\n`;
 
         for (const r of rows) {
-            text += `${r.customerName}: ${r.quantity} Adet\n`;
+            text += `${r.customerName}: ${r.productSummary}\n`;
         }
 
         text += `=============\n`;
@@ -217,6 +230,83 @@ export default function ReportsScreen() {
         } catch (err: any) {
             console.error('Pano hatası:', err);
             Alert.alert('Hata', 'Panoya kopyalanamadı.');
+        }
+    };
+
+    // ── PDF Export ─────────────────────────────────────
+    const handleExportPDF = async () => {
+        if (rows.length === 0) {
+            Alert.alert('Uyarı', 'Dışa aktarılacak sipariş bulunamadı.');
+            return;
+        }
+
+        const dateStr = formatDateShort(selectedDate);
+
+        const html = `
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+    <style>
+      body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 20px; color: #333; }
+      .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #2E7D32; padding-bottom: 10px; }
+      .header h1 { margin: 0; color: #2E7D32; font-size: 24px; }
+      .header p { margin: 5px 0 0; color: #666; font-size: 16px; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+      th { background-color: #f5f5f5; border: 1px solid #ddd; padding: 12px 8px; text-align: left; font-size: 14px; }
+      td { border: 1px solid #ddd; padding: 12px 8px; text-align: left; font-size: 14px; }
+      tr:nth-child(even) { background-color: #fafafa; }
+      .footer { margin-top: 20px; padding-top: 10px; border-top: 2px solid #eee; }
+      .summary-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-weight: bold; font-size: 16px; }
+      .total-amount { color: #2E7D32; font-size: 18px; }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>Lavaş Fırını Dağıtım Listesi</h1>
+      <p>${dateStr}</p>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 30%">Müşteri</th>
+          <th style="width: 50%">Ürünler</th>
+          <th style="width: 20%; text-align: right;">Toplam</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr>
+            <td>${r.customerName}</td>
+            <td>${r.productSummary}</td>
+            <td style="text-align: right;">${formatCurrency(r.totalPrice)}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    <div class="footer">
+      <div class="summary-row">
+        <span>Toplam Sipariş:</span>
+        <span>${summary.count} Müşteri</span>
+      </div>
+      <div class="summary-row">
+        <span>Toplam Üretim:</span>
+        <span>${summary.totalQty} Adet</span>
+      </div>
+      <div class="summary-row total-amount">
+        <span>Genel Toplam:</span>
+        <span>${formatCurrency(summary.totalAmount)}</span>
+      </div>
+    </div>
+  </body>
+</html>
+        `;
+
+        try {
+            const { uri } = await Print.printToFileAsync({ html });
+            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+        } catch (err: any) {
+            console.error('PDF hatası:', err);
+            Alert.alert('Hata', `PDF oluşturulamadı: ${err.message}`);
         }
     };
 
@@ -238,7 +328,7 @@ export default function ReportsScreen() {
                         {item.customerName}
                     </Text>
                     <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                        {item.quantity} Adet × {formatCurrency(item.unitPrice)}
+                        {item.productSummary}
                     </Text>
                 </View>
 
@@ -410,7 +500,6 @@ export default function ReportsScreen() {
                             flexDirection: 'row',
                             justifyContent: 'center',
                             alignItems: 'center',
-                            padding: 0,
                         }}
                         activeOpacity={0.7}
                     >
@@ -419,11 +508,34 @@ export default function ReportsScreen() {
                             color: 'white',
                             fontSize: 14,
                             fontWeight: 'bold',
-                            includeFontPadding: false,
-                            textAlignVertical: 'center',
                             lineHeight: 18,
                         }}>
-                            Excel İndir
+                            Excel
+                        </RNText>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        onPress={handleExportPDF}
+                        style={{
+                            flex: 1,
+                            height: 50,
+                            backgroundColor: '#D32F2F',
+                            borderRadius: 8,
+                            flexDirection: 'row',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            padding: 0,
+                        }}
+                        activeOpacity={0.7}
+                    >
+                        <FileText size={18} color="white" style={{ marginRight: 6 }} />
+                        <RNText style={{
+                            color: 'white',
+                            fontSize: 14,
+                            fontWeight: 'bold',
+                            lineHeight: 18,
+                        }}>
+                            PDF
                         </RNText>
                     </TouchableOpacity>
 
@@ -446,11 +558,9 @@ export default function ReportsScreen() {
                             color: 'white',
                             fontSize: 14,
                             fontWeight: 'bold',
-                            includeFontPadding: false,
-                            textAlignVertical: 'center',
                             lineHeight: 18,
                         }}>
-                            WhatsApp Listesi
+                            WhatsApp
                         </RNText>
                     </TouchableOpacity>
                 </Surface>
@@ -523,8 +633,8 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         flexDirection: 'row',
-        gap: 10,
-        paddingHorizontal: 16,
+        gap: 8,
+        paddingHorizontal: 12,
         paddingVertical: 12,
         borderTopLeftRadius: 16,
         borderTopRightRadius: 16,

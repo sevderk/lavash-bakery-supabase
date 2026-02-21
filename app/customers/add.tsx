@@ -13,6 +13,7 @@ import {
 import {
     Button,
     Divider,
+    SegmentedButtons,
     Snackbar,
     Text,
     TextInput,
@@ -20,6 +21,7 @@ import {
 } from 'react-native-paper';
 
 import { supabase } from '@/lib/supabase';
+import type { DiscountType } from '@/lib/types';
 
 export default function AddCustomerScreen() {
     const theme = useTheme();
@@ -27,6 +29,8 @@ export default function AddCustomerScreen() {
 
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
+    const [discountType, setDiscountType] = useState<DiscountType>('none');
+    const [discountValue, setDiscountValue] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [snackbar, setSnackbar] = useState({ visible: false, message: '', isError: false });
 
@@ -114,9 +118,15 @@ export default function AddCustomerScreen() {
 
         setSubmitting(true);
 
+        const parsedDiscount = discountType !== 'none'
+            ? parseFloat(discountValue.replace(',', '.')) || 0
+            : 0;
+
         const { error } = await supabase.from('customers').insert({
             name: name.trim(),
             phone: phone.trim() || null,
+            discount_type: discountType,
+            discount_value: parsedDiscount,
         });
 
         setSubmitting(false);
@@ -208,6 +218,41 @@ export default function AddCustomerScreen() {
                     left={<TextInput.Icon icon="phone" />}
                     placeholder="Örn: 0532 123 45 67"
                 />
+
+                {/* Discount Section */}
+                <Divider style={{ marginVertical: 16 }} />
+                <Text
+                    variant="titleSmall"
+                    style={{ color: theme.colors.onSurface, fontWeight: '600', marginBottom: 12 }}
+                >
+                    İndirim Bilgisi
+                </Text>
+
+                <SegmentedButtons
+                    value={discountType}
+                    onValueChange={(val) => setDiscountType(val as DiscountType)}
+                    buttons={[
+                        { value: 'none', label: 'Yok' },
+                        { value: 'percentage', label: '% Yüzde' },
+                        { value: 'fixed', label: '₺ Sabit' },
+                    ]}
+                    style={{ marginBottom: 16 }}
+                />
+
+                {discountType !== 'none' && (
+                    <TextInput
+                        label={discountType === 'percentage' ? 'İndirim Oranı (%)' : 'İndirim Tutarı (₺)'}
+                        value={discountValue}
+                        onChangeText={setDiscountValue}
+                        mode="outlined"
+                        style={styles.input}
+                        keyboardType="decimal-pad"
+                        outlineColor={theme.colors.outline}
+                        activeOutlineColor={theme.colors.primary}
+                        left={<TextInput.Icon icon={discountType === 'percentage' ? 'percent' : 'cash-minus'} />}
+                        placeholder={discountType === 'percentage' ? 'Örn: 10' : 'Örn: 1.50'}
+                    />
+                )}
 
                 {/* Submit */}
                 <Button

@@ -30,10 +30,10 @@ export default function HomeScreen() {
         todayStart.setHours(0, 0, 0, 0);
         const todayISO = todayStart.toISOString();
 
-        // Fetch today's orders
+        // Fetch today's orders with order_items for accurate quantity
         const { data: todayOrders } = await supabase
             .from('orders')
-            .select('quantity, total_price, customer_id')
+            .select('total_price, customer_id, order_items(quantity)')
             .gte('order_date', todayISO);
 
         let todayQuantity = 0;
@@ -42,7 +42,10 @@ export default function HomeScreen() {
 
         if (todayOrders) {
             for (const order of todayOrders) {
-                todayQuantity += order.quantity ?? 0;
+                // Sum quantities from order_items (multi-product)
+                const items = (order as any).order_items ?? [];
+                const itemQty = items.reduce((sum: number, oi: any) => sum + (oi.quantity ?? 0), 0);
+                todayQuantity += itemQty > 0 ? itemQty : 0;
                 todayRevenue += Number(order.total_price ?? 0);
                 uniqueCustomers.add(order.customer_id);
             }

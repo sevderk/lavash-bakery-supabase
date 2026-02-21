@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { ClipboardList, FileText, Home, Users } from 'lucide-react-native';
+import { Box, ClipboardList, FileText, Home, Users } from 'lucide-react-native';
 import React from 'react';
 
 import { HapticTab } from '@/components/haptic-tab';
@@ -44,6 +44,13 @@ export default function TabLayout() {
                 options={{
                     title: 'Müşteriler',
                     tabBarIcon: ({ color, size }) => <Users size={size ?? 24} color={color} />,
+                }}
+            />
+            <Tabs.Screen
+                name="products"
+                options={{
+                    title: 'Ürünler',
+                    tabBarIcon: ({ color, size }) => <Box size={size ?? 24} color={color} />,
                 }}
             />
             <Tabs.Screen

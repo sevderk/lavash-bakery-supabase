@@ -2,8 +2,11 @@ import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-rou
 import {
     ArrowDownCircle,
     ArrowUpCircle,
+    Minus,
     Pencil,
     Phone,
+    Plus,
+    Tag,
     Trash2,
     Wallet
 } from 'lucide-react-native';
@@ -13,6 +16,7 @@ import {
     FlatList,
     RefreshControl,
     Text as RNText,
+    ScrollView,
     StyleSheet,
     TouchableOpacity,
     View
@@ -23,6 +27,7 @@ import {
     Divider,
     Modal,
     Portal,
+    SegmentedButtons,
     Surface,
     Text,
     TextInput,
@@ -30,7 +35,7 @@ import {
 } from 'react-native-paper';
 
 import { supabase } from '@/lib/supabase';
-import type { Customer } from '@/lib/types';
+import type { Customer, DiscountType } from '@/lib/types';
 
 /** Unified transaction item for the timeline */
 interface TransactionItem {
@@ -40,8 +45,20 @@ interface TransactionItem {
     amount: number;
     /** Only for orders */
     quantity?: number;
+    /** Only for orders — product breakdown text */
+    productSummary?: string;
     /** Only for payments */
     note?: string | null;
+    /** Only for payments */
+    paymentMethod?: string;
+}
+
+/** Order item for editing */
+interface EditOrderItem {
+    productId: string;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
 }
 
 export default function CustomerDetailScreen() {
@@ -58,13 +75,22 @@ export default function CustomerDetailScreen() {
     const [paymentModalVisible, setPaymentModalVisible] = useState(false);
     const [paymentAmount, setPaymentAmount] = useState('');
     const [paymentNote, setPaymentNote] = useState('');
+    const [paymentMethod, setPaymentMethod] = useState('Nakit');
     const [submittingPayment, setSubmittingPayment] = useState(false);
 
     // Edit modal state
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [editName, setEditName] = useState('');
     const [editPhone, setEditPhone] = useState('');
+    const [editDiscountType, setEditDiscountType] = useState<DiscountType>('none');
+    const [editDiscountValue, setEditDiscountValue] = useState('');
     const [submittingEdit, setSubmittingEdit] = useState(false);
+
+    // Edit order modal state
+    const [editOrderModalVisible, setEditOrderModalVisible] = useState(false);
+    const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+    const [editOrderItems, setEditOrderItems] = useState<EditOrderItem[]>([]);
+    const [submittingOrderEdit, setSubmittingOrderEdit] = useState(false);
 
     const fetchData = useCallback(async () => {
         if (!id) return;
@@ -78,10 +104,10 @@ export default function CustomerDetailScreen() {
 
         if (customerData) setCustomer(customerData);
 
-        // Fetch orders
+        // Fetch orders with order_items and product names
         const { data: orders } = await supabase
             .from('orders')
-            .select('*')
+            .select('*, order_items(quantity, unit_price, product_id, products(name))')
             .eq('customer_id', id)
             .order('order_date', { ascending: false });
 
@@ -97,12 +123,22 @@ export default function CustomerDetailScreen() {
 
         if (orders) {
             for (const o of orders) {
+                // Build product summary from order_items
+                const items: { name: string; qty: number }[] = ((o as any).order_items ?? []).map((oi: any) => ({
+                    name: oi.products?.name ?? '?',
+                    qty: oi.quantity ?? 0,
+                }));
+                const productSummary = items.length > 0
+                    ? items.map((i) => `${i.qty}x ${i.name}`).join(', ')
+                    : `${o.quantity} Adet`;
+
                 txns.push({
                     id: o.id,
                     type: 'order',
                     date: o.order_date,
                     amount: Number(o.total_price),
                     quantity: o.quantity,
+                    productSummary,
                 });
             }
         }
@@ -115,6 +151,7 @@ export default function CustomerDetailScreen() {
                     date: p.payment_date,
                     amount: Number(p.amount),
                     note: p.note,
+                    paymentMethod: p.payment_method ?? 'Nakit',
                 });
             }
         }
@@ -167,6 +204,7 @@ export default function CustomerDetailScreen() {
             customer_id: id,
             amount,
             note: paymentNote.trim() || null,
+            payment_method: paymentMethod,
         });
 
         setSubmittingPayment(false);
@@ -177,6 +215,7 @@ export default function CustomerDetailScreen() {
             setPaymentModalVisible(false);
             setPaymentAmount('');
             setPaymentNote('');
+            setPaymentMethod('Nakit');
             // Refresh to show updated balance and transaction
             setRefreshing(true);
             fetchData();
@@ -188,6 +227,12 @@ export default function CustomerDetailScreen() {
         if (!customer) return;
         setEditName(customer.name);
         setEditPhone(customer.phone ?? '');
+        setEditDiscountType((customer.discount_type as DiscountType) ?? 'none');
+        setEditDiscountValue(
+            customer.discount_type !== 'none' && customer.discount_value
+                ? String(customer.discount_value)
+                : ''
+        );
         setEditModalVisible(true);
     };
 
@@ -199,11 +244,17 @@ export default function CustomerDetailScreen() {
 
         setSubmittingEdit(true);
 
+        const parsedDiscount = editDiscountType !== 'none'
+            ? parseFloat(editDiscountValue.replace(',', '.')) || 0
+            : 0;
+
         const { error } = await supabase
             .from('customers')
             .update({
                 name: editName.trim(),
                 phone: editPhone.trim() || null,
+                discount_type: editDiscountType,
+                discount_value: parsedDiscount,
             })
             .eq('id', id);
 
@@ -262,6 +313,136 @@ export default function CustomerDetailScreen() {
                 },
             ]
         );
+    };
+
+    // ── Edit Order ──────────────────────────────────────
+    const openEditOrderModal = async (orderId: string) => {
+        // Fetch order_items with products for this order
+        const { data: items, error } = await supabase
+            .from('order_items')
+            .select('quantity, unit_price, product_id, products(name)')
+            .eq('order_id', orderId);
+
+        if (error || !items) {
+            Alert.alert('Hata', 'Sipariş kalemleri yüklenemedi.');
+            return;
+        }
+
+        const editItems: EditOrderItem[] = items.map((oi: any) => ({
+            productId: oi.product_id,
+            productName: oi.products?.name ?? '?',
+            quantity: oi.quantity ?? 0,
+            unitPrice: Number(oi.unit_price),
+        }));
+
+        // Also fetch all products to allow adding new items
+        const { data: allProducts } = await supabase
+            .from('products')
+            .select('*')
+            .order('name', { ascending: true });
+
+        if (allProducts) {
+            for (const p of allProducts) {
+                if (!editItems.find((ei) => ei.productId === p.id)) {
+                    editItems.push({
+                        productId: p.id,
+                        productName: p.name,
+                        quantity: 0,
+                        unitPrice: Number(p.price),
+                    });
+                }
+            }
+        }
+
+        setEditOrderItems(editItems);
+        setEditingOrderId(orderId);
+        setEditOrderModalVisible(true);
+    };
+
+    const updateEditOrderQty = (productId: string, delta: number) => {
+        setEditOrderItems((prev) =>
+            prev.map((item) =>
+                item.productId === productId
+                    ? { ...item, quantity: Math.max(0, item.quantity + delta) }
+                    : item
+            )
+        );
+    };
+
+    const editOrderTotal = editOrderItems.reduce(
+        (sum, i) => sum + i.quantity * i.unitPrice,
+        0
+    );
+
+    const handleEditOrderSubmit = async () => {
+        if (!editingOrderId) return;
+
+        const activeItems = editOrderItems.filter((i) => i.quantity > 0);
+        if (activeItems.length === 0) {
+            Alert.alert('Uyarı', 'En az bir ürün seçmelisiniz.');
+            return;
+        }
+
+        setSubmittingOrderEdit(true);
+
+        try {
+            // 1. Delete existing order_items
+            const { error: delError } = await supabase
+                .from('order_items')
+                .delete()
+                .eq('order_id', editingOrderId);
+
+            if (delError) {
+                Alert.alert('Hata', `Eski kalemler silinemedi: ${delError.message}`);
+                setSubmittingOrderEdit(false);
+                return;
+            }
+
+            // 2. Insert new order_items
+            const newItems = activeItems.map((item) => ({
+                order_id: editingOrderId,
+                product_id: item.productId,
+                quantity: item.quantity,
+                unit_price: item.unitPrice,
+                total_price: item.quantity * item.unitPrice,
+            }));
+
+            const { error: insError } = await supabase
+                .from('order_items')
+                .insert(newItems);
+
+            if (insError) {
+                Alert.alert('Hata', `Yeni kalemler eklenemedi: ${insError.message}`);
+                setSubmittingOrderEdit(false);
+                return;
+            }
+
+            // 3. Update orders.total_price (triggers balance correction)
+            const totalQty = activeItems.reduce((s, i) => s + i.quantity, 0);
+            const { error: updError } = await supabase
+                .from('orders')
+                .update({
+                    quantity: totalQty,
+                    unit_price: totalQty > 0 ? editOrderTotal / totalQty : 0,
+                    total_price: editOrderTotal,
+                })
+                .eq('id', editingOrderId);
+
+            if (updError) {
+                Alert.alert('Hata', `Sipariş güncellenemedi: ${updError.message}`);
+                setSubmittingOrderEdit(false);
+                return;
+            }
+
+            setSubmittingOrderEdit(false);
+            setEditOrderModalVisible(false);
+            setEditingOrderId(null);
+            setRefreshing(true);
+            fetchData();
+        } catch (err: any) {
+            setSubmittingOrderEdit(false);
+            Alert.alert('Beklenmeyen Hata', err.message);
+        }
     };
 
     // ── Header Right Icons ─────────────────────────────
@@ -324,7 +505,10 @@ export default function CustomerDetailScreen() {
                         variant="titleSmall"
                         style={{ color: theme.colors.onSurface, fontWeight: '600' }}
                     >
-                        {isOrder ? `${item.quantity} Lavaş` : 'Tahsilat'}
+                        {isOrder
+                            ? (item.productSummary ?? `${item.quantity} Adet`)
+                            : `${item.paymentMethod === 'Kredi Kartı' ? '💳' : item.paymentMethod === 'Havale/EFT' ? '🏦' : '💵'} ${item.paymentMethod ?? 'Nakit'}`
+                        }
                     </Text>
                     <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
                         {formatDate(item.date)}
@@ -345,6 +529,16 @@ export default function CustomerDetailScreen() {
                 >
                     {isOrder ? '+' : '−'}{formatCurrency(item.amount)}
                 </Text>
+
+                {isOrder && (
+                    <TouchableOpacity
+                        onPress={() => openEditOrderModal(item.id)}
+                        style={{ marginLeft: 8 }}
+                        activeOpacity={0.6}
+                    >
+                        <Pencil size={16} color={theme.colors.onSurfaceVariant} />
+                    </TouchableOpacity>
+                )}
             </Surface>
         );
     };
@@ -391,6 +585,17 @@ export default function CustomerDetailScreen() {
                             <Phone size={14} color={theme.colors.onSurfaceVariant} />
                             <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginLeft: 6 }}>
                                 {customer.phone}
+                            </Text>
+                        </View>
+                    )}
+
+                    {customer.discount_type && customer.discount_type !== 'none' && customer.discount_value > 0 && (
+                        <View style={styles.discountBadge}>
+                            <Tag size={14} color="#F57F17" />
+                            <Text variant="bodySmall" style={{ color: '#F57F17', fontWeight: '600', marginLeft: 4 }}>
+                                {customer.discount_type === 'percentage'
+                                    ? `%${customer.discount_value} İndirim`
+                                    : `₺${Number(customer.discount_value).toFixed(2)} İndirim`}
                             </Text>
                         </View>
                     )}
@@ -511,8 +716,25 @@ export default function CustomerDetailScreen() {
                         placeholder="0.00"
                     />
 
+                    <Text
+                        variant="titleSmall"
+                        style={{ color: theme.colors.onSurface, fontWeight: '600', marginBottom: 8 }}
+                    >
+                        Ödeme Yöntemi
+                    </Text>
+                    <SegmentedButtons
+                        value={paymentMethod}
+                        onValueChange={setPaymentMethod}
+                        buttons={[
+                            { value: 'Nakit', label: '💵 Nakit' },
+                            { value: 'Kredi Kartı', label: '💳 Kart' },
+                            { value: 'Havale/EFT', label: '🏦 Havale' },
+                        ]}
+                        style={{ marginBottom: 16 }}
+                    />
+
                     <TextInput
-                        label="Not (Opsiyonel)"
+                        label="Açıklama (Opsiyonel)"
                         value={paymentNote}
                         onChangeText={setPaymentNote}
                         mode="outlined"
@@ -520,7 +742,7 @@ export default function CustomerDetailScreen() {
                         outlineColor={theme.colors.outline}
                         activeOutlineColor="#2E7D32"
                         left={<TextInput.Icon icon="note-text" />}
-                        placeholder="Örn: Nakit ödeme"
+                        placeholder="Örn: Haftalık tahsilat"
                     />
 
                     <View style={styles.modalActions}>
@@ -619,6 +841,41 @@ export default function CustomerDetailScreen() {
                         placeholder="Örn: 0532 123 45 67"
                     />
 
+                    {/* Discount Section */}
+                    <Divider style={{ marginVertical: 12 }} />
+                    <Text
+                        variant="titleSmall"
+                        style={{ color: theme.colors.onSurface, fontWeight: '600', marginBottom: 12 }}
+                    >
+                        İndirim Bilgisi
+                    </Text>
+
+                    <SegmentedButtons
+                        value={editDiscountType}
+                        onValueChange={(val) => setEditDiscountType(val as DiscountType)}
+                        buttons={[
+                            { value: 'none', label: 'Yok' },
+                            { value: 'percentage', label: '% Yüzde' },
+                            { value: 'fixed', label: '₺ Sabit' },
+                        ]}
+                        style={{ marginBottom: 16 }}
+                    />
+
+                    {editDiscountType !== 'none' && (
+                        <TextInput
+                            label={editDiscountType === 'percentage' ? 'İndirim Oranı (%)' : 'İndirim Tutarı (₺)'}
+                            value={editDiscountValue}
+                            onChangeText={setEditDiscountValue}
+                            mode="outlined"
+                            style={styles.modalInput}
+                            keyboardType="decimal-pad"
+                            outlineColor={theme.colors.outline}
+                            activeOutlineColor={theme.colors.primary}
+                            left={<TextInput.Icon icon={editDiscountType === 'percentage' ? 'percent' : 'cash-minus'} />}
+                            placeholder={editDiscountType === 'percentage' ? 'Örn: 10' : 'Örn: 1.50'}
+                        />
+                    )}
+
                     <View style={styles.modalActions}>
                         <TouchableOpacity
                             onPress={() => setEditModalVisible(false)}
@@ -672,6 +929,154 @@ export default function CustomerDetailScreen() {
                     </View>
                 </Modal>
             </Portal>
+
+            {/* Edit Order Modal */}
+            <Portal>
+                <Modal
+                    visible={editOrderModalVisible}
+                    onDismiss={() => setEditOrderModalVisible(false)}
+                    contentContainerStyle={[styles.editOrderModal, { backgroundColor: theme.colors.surface }]}
+                >
+                    <Text variant="titleLarge" style={{ color: theme.colors.onSurface, fontWeight: '700' }}>
+                        Siparişi Düzenle
+                    </Text>
+                    <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
+                        Miktarları değiştirin ve kaydedin
+                    </Text>
+
+                    <Divider style={{ marginBottom: 8 }} />
+
+                    <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+                        {editOrderItems.map((item) => {
+                            const lineTotal = item.quantity * item.unitPrice;
+                            const isActive = item.quantity > 0;
+                            return (
+                                <View
+                                    key={item.productId}
+                                    style={[
+                                        styles.editOrderRow,
+                                        {
+                                            backgroundColor: isActive
+                                                ? (theme.dark ? '#2A2018' : '#FFF8F0')
+                                                : theme.colors.surface,
+                                        },
+                                    ]}
+                                >
+                                    <View style={{ flex: 1 }}>
+                                        <Text variant="titleSmall" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
+                                            {item.productName}
+                                        </Text>
+                                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                                            {formatCurrency(item.unitPrice)} / adet
+                                        </Text>
+                                    </View>
+
+                                    <View style={styles.editOrderStepper}>
+                                        <TouchableOpacity
+                                            onPress={() => updateEditOrderQty(item.productId, -1)}
+                                            style={[styles.editOrderStepBtn, { borderColor: theme.colors.outline }]}
+                                            disabled={item.quantity === 0}
+                                            activeOpacity={0.6}
+                                        >
+                                            <Minus size={16} color={item.quantity > 0 ? theme.colors.primary : theme.colors.outline} />
+                                        </TouchableOpacity>
+
+                                        <Text
+                                            variant="titleSmall"
+                                            style={{ width: 40, textAlign: 'center', color: theme.colors.onSurface, fontWeight: '700' }}
+                                        >
+                                            {item.quantity}
+                                        </Text>
+
+                                        <TouchableOpacity
+                                            onPress={() => updateEditOrderQty(item.productId, 1)}
+                                            style={[styles.editOrderStepBtn, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primaryContainer }]}
+                                            activeOpacity={0.6}
+                                        >
+                                            <Plus size={16} color={theme.colors.primary} />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <Text
+                                        variant="bodySmall"
+                                        style={{
+                                            width: 70,
+                                            textAlign: 'right',
+                                            color: isActive ? theme.colors.primary : theme.colors.onSurfaceVariant,
+                                            fontWeight: isActive ? '700' : '400',
+                                        }}
+                                    >
+                                        {isActive ? formatCurrency(lineTotal) : '—'}
+                                    </Text>
+                                </View>
+                            );
+                        })}
+                    </ScrollView>
+
+                    <Divider style={{ marginTop: 8, marginBottom: 12 }} />
+
+                    <View style={styles.editOrderTotalRow}>
+                        <Text variant="titleMedium" style={{ color: theme.colors.onSurface, fontWeight: '700' }}>
+                            Toplam
+                        </Text>
+                        <Text variant="titleMedium" style={{ color: theme.colors.primary, fontWeight: '800' }}>
+                            {formatCurrency(editOrderTotal)}
+                        </Text>
+                    </View>
+
+                    <View style={styles.modalActions}>
+                        <TouchableOpacity
+                            onPress={() => setEditOrderModalVisible(false)}
+                            style={{
+                                flex: 1,
+                                height: 50,
+                                borderRadius: 8,
+                                borderWidth: 1.5,
+                                borderColor: theme.colors.outline,
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                marginRight: 8,
+                            }}
+                            activeOpacity={0.7}
+                        >
+                            <RNText style={{
+                                color: theme.colors.onSurface,
+                                fontSize: 14,
+                                fontWeight: 'bold',
+                                includeFontPadding: false,
+                                textAlignVertical: 'center',
+                                lineHeight: 18,
+                            }}>
+                                İptal
+                            </RNText>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            onPress={handleEditOrderSubmit}
+                            disabled={submittingOrderEdit}
+                            style={{
+                                flex: 1,
+                                height: 50,
+                                backgroundColor: submittingOrderEdit ? theme.colors.primaryContainer : theme.colors.primary,
+                                borderRadius: 8,
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                            }}
+                            activeOpacity={0.7}
+                        >
+                            <RNText style={{
+                                color: 'white',
+                                fontSize: 14,
+                                fontWeight: 'bold',
+                                includeFontPadding: false,
+                                textAlignVertical: 'center',
+                                lineHeight: 18,
+                            }}>
+                                {submittingOrderEdit ? 'Kaydediliyor...' : 'Kaydet'}
+                            </RNText>
+                        </TouchableOpacity>
+                    </View>
+                </Modal>
+            </Portal>
         </View>
     );
 }
@@ -694,6 +1099,16 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         marginTop: 6,
+    },
+    discountBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 8,
+        backgroundColor: '#FFF8E1',
+        alignSelf: 'flex-start',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 12,
     },
     balanceRow: {
         flexDirection: 'row',
@@ -752,5 +1167,38 @@ const styles = StyleSheet.create({
     modalActions: {
         flexDirection: 'row',
         marginTop: 8,
+    },
+    editOrderModal: {
+        margin: 16,
+        borderRadius: 20,
+        padding: 20,
+        maxHeight: '85%',
+    },
+    editOrderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 4,
+        borderRadius: 8,
+        marginBottom: 4,
+    },
+    editOrderStepper: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginHorizontal: 8,
+    },
+    editOrderStepBtn: {
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        borderWidth: 1.5,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    editOrderTotalRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 12,
     },
 });
